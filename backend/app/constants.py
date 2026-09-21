@@ -1,0 +1,2 @@
+HARDCODED_USERNAME = "user"
+HARDCODED_PASSWORD = "password"
