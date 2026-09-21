@@ -1,30 +1,72 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { KanbanBoard } from "@/components/KanbanBoard";
+import * as api from "@/lib/api";
+import type { BoardData } from "@/lib/kanban";
 
-const getFirstColumn = () => screen.getAllByTestId(/column-/i)[0];
+vi.mock("@/lib/api");
+
+const seedBoard = (): BoardData => ({
+  columns: [
+    { id: "col-a", title: "Backlog", cardIds: ["card-1"] },
+    { id: "col-b", title: "Done", cardIds: [] },
+  ],
+  cards: {
+    "card-1": { id: "card-1", title: "Existing card", details: "Notes" },
+  },
+});
+
+const getFirstColumn = async () => (await screen.findAllByTestId(/column-/i))[0];
 
 describe("KanbanBoard", () => {
-  it("renders five columns", () => {
-    render(<KanbanBoard />);
-    expect(screen.getAllByTestId(/column-/i)).toHaveLength(5);
+  beforeEach(() => {
+    vi.mocked(api.fetchBoard).mockResolvedValue(seedBoard());
   });
 
-  it("renames a column", async () => {
+  it("loads and renders the board's columns", async () => {
     render(<KanbanBoard />);
-    const column = getFirstColumn();
+    expect(await screen.findAllByTestId(/column-/i)).toHaveLength(2);
+  });
+
+  it("renames a column on blur", async () => {
+    const base = seedBoard();
+    const renamed: BoardData = {
+      ...base,
+      columns: [{ ...base.columns[0], title: "New Name" }, base.columns[1]],
+    };
+    vi.mocked(api.renameColumn).mockResolvedValue(renamed);
+
+    render(<KanbanBoard />);
+    const column = await getFirstColumn();
     const input = within(column).getByLabelText("Column title");
     await userEvent.clear(input);
     await userEvent.type(input, "New Name");
-    expect(input).toHaveValue("New Name");
+    await userEvent.tab();
+
+    await waitFor(() => expect(api.renameColumn).toHaveBeenCalledWith("col-a", "New Name"));
+    expect(await within(column).findByDisplayValue("New Name")).toBeInTheDocument();
   });
 
   it("adds and removes a card", async () => {
+    const base = seedBoard();
+    const withNewCard: BoardData = {
+      columns: [
+        { id: "col-a", title: "Backlog", cardIds: ["card-1", "card-2"] },
+        base.columns[1],
+      ],
+      cards: {
+        ...base.cards,
+        "card-2": { id: "card-2", title: "New card", details: "Notes" },
+      },
+    };
+    vi.mocked(api.addCard).mockResolvedValue(withNewCard);
+    vi.mocked(api.deleteCard).mockResolvedValue(base);
+
     render(<KanbanBoard />);
-    const column = getFirstColumn();
-    const addButton = within(column).getByRole("button", {
-      name: /add a card/i,
-    });
+    const column = await getFirstColumn();
+
+    const addButton = within(column).getByRole("button", { name: /add a card/i });
     await userEvent.click(addButton);
 
     const titleInput = within(column).getByPlaceholderText(/card title/i);
@@ -34,13 +76,43 @@ describe("KanbanBoard", () => {
 
     await userEvent.click(within(column).getByRole("button", { name: /add card/i }));
 
-    expect(within(column).getByText("New card")).toBeInTheDocument();
+    expect(await within(column).findByText("New card")).toBeInTheDocument();
 
     const deleteButton = within(column).getByRole("button", {
       name: /delete new card/i,
     });
     await userEvent.click(deleteButton);
 
-    expect(within(column).queryByText("New card")).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(within(column).queryByText("New card")).not.toBeInTheDocument()
+    );
+  });
+
+  it("edits a card", async () => {
+    const base = seedBoard();
+    const updated: BoardData = {
+      ...base,
+      cards: {
+        "card-1": { id: "card-1", title: "Updated title", details: "Updated notes" },
+      },
+    };
+    vi.mocked(api.updateCard).mockResolvedValue(updated);
+
+    render(<KanbanBoard />);
+    const column = await getFirstColumn();
+
+    await userEvent.click(
+      within(column).getByRole("button", { name: /edit existing card/i })
+    );
+
+    const titleInput = within(column).getByLabelText("Card title");
+    await userEvent.clear(titleInput);
+    await userEvent.type(titleInput, "Updated title");
+    await userEvent.click(within(column).getByRole("button", { name: /save/i }));
+
+    await waitFor(() =>
+      expect(api.updateCard).toHaveBeenCalledWith("card-1", "Updated title", "Notes")
+    );
+    expect(await within(column).findByText("Updated title")).toBeInTheDocument();
   });
 });
