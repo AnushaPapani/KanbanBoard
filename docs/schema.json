@@ -1,0 +1,50 @@
+{
+  "engine": "sqlite",
+  "tables": {
+    "users": {
+      "description": "Supports multiple users for the future; the MVP only ever has one row, seeded on first boot.",
+      "columns": {
+        "id": "INTEGER PRIMARY KEY",
+        "username": "TEXT NOT NULL UNIQUE"
+      }
+    },
+    "boards": {
+      "description": "One board per user for the MVP, enforced by the UNIQUE constraint on user_id.",
+      "columns": {
+        "id": "INTEGER PRIMARY KEY",
+        "user_id": "INTEGER NOT NULL UNIQUE REFERENCES users(id)"
+      }
+    },
+    "columns": {
+      "description": "The Kanban board's fixed columns. id is a stable string (e.g. 'col-backlog') matching the frontend's Column.id, not an autoincrement integer, so it round-trips directly with the frontend's BoardData shape.",
+      "columns": {
+        "id": "TEXT PRIMARY KEY",
+        "board_id": "INTEGER NOT NULL REFERENCES boards(id)",
+        "title": "TEXT NOT NULL",
+        "position": "INTEGER NOT NULL"
+      }
+    },
+    "cards": {
+      "description": "A card belongs to exactly one column. position replaces the frontend's Column.cardIds array — ordering within a column is 'ORDER BY position' instead of an id list.",
+      "columns": {
+        "id": "TEXT PRIMARY KEY",
+        "column_id": "TEXT NOT NULL REFERENCES columns(id)",
+        "title": "TEXT NOT NULL",
+        "details": "TEXT NOT NULL",
+        "position": "INTEGER NOT NULL"
+      }
+    }
+  },
+  "seed_on_first_boot": {
+    "users": [{ "username": "user" }],
+    "boards": [{ "user": "user" }],
+    "columns": [
+      { "id": "col-backlog", "title": "Backlog", "position": 0 },
+      { "id": "col-discovery", "title": "Discovery", "position": 1 },
+      { "id": "col-progress", "title": "In Progress", "position": 2 },
+      { "id": "col-review", "title": "Review", "position": 3 },
+      { "id": "col-done", "title": "Done", "position": 4 }
+    ],
+    "cards": []
+  }
+}
