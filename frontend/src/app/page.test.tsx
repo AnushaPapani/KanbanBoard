@@ -19,6 +19,14 @@ describe("Home (auth gate)", () => {
     expect(await screen.findByRole("heading", { name: "Sign in" })).toBeInTheDocument();
   });
 
+  it("falls back to the login form if checking the session fails outright", async () => {
+    vi.spyOn(global, "fetch").mockRejectedValue(new TypeError("network error"));
+
+    render(<Home />);
+
+    expect(await screen.findByRole("heading", { name: "Sign in" })).toBeInTheDocument();
+  });
+
   it("shows the board after signing in with correct credentials", async () => {
     const fetchMock = vi.spyOn(global, "fetch");
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 401 }));

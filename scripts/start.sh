@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 if [ ! -f .env ]; then
-  echo "No .env found; copying .env.example (add OPENROUTER_API_KEY before using AI chat)."
+  echo "No .env found; copying .env.example (add CLAUDE_API_KEY before using AI chat)."
   cp .env.example .env
 fi
 

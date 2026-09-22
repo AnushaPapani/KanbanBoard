@@ -142,7 +142,9 @@ async def rename_column(
     conn: sqlite3.Connection = Depends(get_db),
     user_id: int = Depends(require_user_id),
 ) -> board.BoardData:
-    return board.rename_column(conn, user_id, column_id, body.title)
+    result = board.rename_column(conn, user_id, column_id, body.title)
+    conn.commit()
+    return result
 
 
 @app.post("/api/board/cards", response_model=board.BoardData)
@@ -151,7 +153,9 @@ async def add_card(
     conn: sqlite3.Connection = Depends(get_db),
     user_id: int = Depends(require_user_id),
 ) -> board.BoardData:
-    return board.add_card(conn, user_id, body.column_id, body.title, body.details)
+    result = board.add_card(conn, user_id, body.column_id, body.title, body.details)
+    conn.commit()
+    return result
 
 
 @app.patch("/api/board/cards/{card_id}", response_model=board.BoardData)
@@ -161,7 +165,9 @@ async def update_card(
     conn: sqlite3.Connection = Depends(get_db),
     user_id: int = Depends(require_user_id),
 ) -> board.BoardData:
-    return board.update_card(conn, user_id, card_id, body.title, body.details)
+    result = board.update_card(conn, user_id, card_id, body.title, body.details)
+    conn.commit()
+    return result
 
 
 @app.delete("/api/board/cards/{card_id}", response_model=board.BoardData)
@@ -170,7 +176,9 @@ async def delete_card(
     conn: sqlite3.Connection = Depends(get_db),
     user_id: int = Depends(require_user_id),
 ) -> board.BoardData:
-    return board.delete_card(conn, user_id, card_id)
+    result = board.delete_card(conn, user_id, card_id)
+    conn.commit()
+    return result
 
 
 @app.post("/api/board/cards/{card_id}/move", response_model=board.BoardData)
@@ -180,7 +188,9 @@ async def move_card(
     conn: sqlite3.Connection = Depends(get_db),
     user_id: int = Depends(require_user_id),
 ) -> board.BoardData:
-    return board.move_card(conn, user_id, card_id, body.column_id, body.position)
+    result = board.move_card(conn, user_id, card_id, body.column_id, body.position)
+    conn.commit()
+    return result
 
 
 @app.post("/api/chat", response_model=ChatResponse)
@@ -195,8 +205,13 @@ async def chat(
     result = ai.chat(current_board.model_dump_json(), history, body.message)
     reply = result["reply"]
 
-    for action in result.get("actions", []):
-        board.apply_action(conn, user_id, action)
+    try:
+        for action in result.get("actions", []):
+            board.apply_action(conn, user_id, action)
+    except HTTPException:
+        conn.rollback()
+        raise
+    conn.commit()
 
     history.append({"role": "user", "content": body.message})
     history.append({"role": "assistant", "content": reply})

@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 Set-Location (Join-Path $PSScriptRoot "..")
 
 if (-not (Test-Path ".env")) {
-    Write-Host "No .env found; copying .env.example (add OPENROUTER_API_KEY before using AI chat)."
+    Write-Host "No .env found; copying .env.example (add CLAUDE_API_KEY before using AI chat)."
     Copy-Item ".env.example" ".env"
 }
 

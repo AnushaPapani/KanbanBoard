@@ -1,6 +1,6 @@
 import type { BoardData } from "@/lib/kanban";
 
-const parseJsonOrThrow = async (response: Response) => {
+export const parseJsonOrThrow = async (response: Response) => {
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
     throw new Error(body.detail ?? "Request failed");

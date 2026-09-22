@@ -11,7 +11,9 @@ export default function Home() {
   const [status, setStatus] = useState<AuthStatus>("loading");
 
   useEffect(() => {
-    getMe().then((session) => setStatus(session ? "authenticated" : "unauthenticated"));
+    getMe()
+      .then((session) => setStatus(session ? "authenticated" : "unauthenticated"))
+      .catch(() => setStatus("unauthenticated"));
   }, []);
 
   const handleLogout = async () => {

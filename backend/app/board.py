@@ -1,8 +1,9 @@
 import secrets
 import sqlite3
+from typing import Annotated, Literal, Union
 
 from fastapi import HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
 
 class Card(BaseModel):
@@ -90,24 +91,7 @@ def rename_column(conn: sqlite3.Connection, user_id: int, column_id: str, title:
     board_id = _get_board_id(conn, user_id)
     _require_column(conn, board_id, column_id)
     conn.execute("UPDATE columns SET title = ? WHERE id = ?", (title, column_id))
-    conn.commit()
     return get_board(conn, user_id)
-
-
-def apply_action(conn: sqlite3.Connection, user_id: int, action: dict) -> None:
-    action_type = action.get("type")
-    if action_type == "add_card":
-        add_card(conn, user_id, action["column_id"], action["title"], action["details"])
-    elif action_type == "update_card":
-        update_card(conn, user_id, action["card_id"], action["title"], action["details"])
-    elif action_type == "delete_card":
-        delete_card(conn, user_id, action["card_id"])
-    elif action_type == "move_card":
-        move_card(conn, user_id, action["card_id"], action["column_id"], action["position"])
-    elif action_type == "rename_column":
-        rename_column(conn, user_id, action["column_id"], action["title"])
-    else:
-        raise HTTPException(status_code=400, detail=f"Unknown action type: {action_type}")
 
 
 def add_card(
@@ -123,7 +107,6 @@ def add_card(
         "INSERT INTO cards (id, column_id, title, details, position) VALUES (?, ?, ?, ?, ?)",
         (card_id, column_id, title, details, position),
     )
-    conn.commit()
     return get_board(conn, user_id)
 
 
@@ -133,7 +116,6 @@ def update_card(
     board_id = _get_board_id(conn, user_id)
     _require_card(conn, board_id, card_id)
     conn.execute("UPDATE cards SET title = ?, details = ? WHERE id = ?", (title, details, card_id))
-    conn.commit()
     return get_board(conn, user_id)
 
 
@@ -142,7 +124,6 @@ def delete_card(conn: sqlite3.Connection, user_id: int, card_id: str) -> BoardDa
     card = _require_card(conn, board_id, card_id)
     conn.execute("DELETE FROM cards WHERE id = ?", (card_id,))
     _renumber_column(conn, card["column_id"])
-    conn.commit()
     return get_board(conn, user_id)
 
 
@@ -170,5 +151,62 @@ def move_card(
         "INSERT INTO cards (id, column_id, title, details, position) VALUES (?, ?, ?, ?, ?)",
         (card_id, target_column_id, card["title"], card["details"], clamped_position),
     )
-    conn.commit()
     return get_board(conn, user_id)
+
+
+class AddCardAction(BaseModel):
+    type: Literal["add_card"]
+    column_id: str
+    title: str
+    details: str
+
+
+class UpdateCardAction(BaseModel):
+    type: Literal["update_card"]
+    card_id: str
+    title: str
+    details: str
+
+
+class DeleteCardAction(BaseModel):
+    type: Literal["delete_card"]
+    card_id: str
+
+
+class MoveCardAction(BaseModel):
+    type: Literal["move_card"]
+    card_id: str
+    column_id: str
+    position: int
+
+
+class RenameColumnAction(BaseModel):
+    type: Literal["rename_column"]
+    column_id: str
+    title: str
+
+
+ChatAction = Annotated[
+    Union[AddCardAction, UpdateCardAction, DeleteCardAction, MoveCardAction, RenameColumnAction],
+    Field(discriminator="type"),
+]
+
+_chat_action_adapter: TypeAdapter[ChatAction] = TypeAdapter(ChatAction)
+
+
+def apply_action(conn: sqlite3.Connection, user_id: int, action: dict) -> None:
+    try:
+        parsed = _chat_action_adapter.validate_python(action)
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid board action: {exc}") from exc
+
+    if isinstance(parsed, AddCardAction):
+        add_card(conn, user_id, parsed.column_id, parsed.title, parsed.details)
+    elif isinstance(parsed, UpdateCardAction):
+        update_card(conn, user_id, parsed.card_id, parsed.title, parsed.details)
+    elif isinstance(parsed, DeleteCardAction):
+        delete_card(conn, user_id, parsed.card_id)
+    elif isinstance(parsed, MoveCardAction):
+        move_card(conn, user_id, parsed.card_id, parsed.column_id, parsed.position)
+    elif isinstance(parsed, RenameColumnAction):
+        rename_column(conn, user_id, parsed.column_id, parsed.title)

@@ -1,12 +1,6 @@
-export type Session = { username: string };
+import { parseJsonOrThrow } from "@/lib/api";
 
-const parseJsonOrThrow = async (response: Response) => {
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    throw new Error(body.detail ?? "Request failed");
-  }
-  return response.json();
-};
+export type Session = { username: string };
 
 export const getMe = async (): Promise<Session | null> => {
   const response = await fetch("/api/me", { credentials: "include" });
