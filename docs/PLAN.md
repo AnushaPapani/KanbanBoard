@@ -137,3 +137,12 @@ Tests / success criteria:
 - [x] Frontend unit tests (`ChatSidebar.test.tsx`, 2 tests, mocked `@/lib/api`): sending a message shows the reply and reports the updated board; a failed request shows an error and leaves the board untouched
 - [x] Playwright e2e test (`kanban.spec.ts`, network-mocked): sending a chat message that requests a card move updates the visible board — passed, along with the full suite (8/8)
 - [x] Manual end-to-end walkthrough against the real Docker container and the live Claude API (throwaway Playwright script, discarded after): logged in, used chat to create a card ("Create a card called 'Chat smoke test' in the Backlog column..."), saw it appear in Backlog with no reload, then in a **second** message said "Now move the 'Chat smoke test' card to Done" (referencing it by name only, relying on conversation history) — saw it move to Done live. Confirms the whole feature works end to end, not just against mocks.
+
+## Post-MVP fixes: UI/UX pass after manual testing
+
+User feedback after trying the app: the chat sidebar was always open and took up too much board space; card text (especially longer AI-generated details) overflowed its card instead of wrapping, looking messy; UI elements should size to their content instead of overflowing it.
+
+- [x] `ChatSidebar` is now closed by default and toggled via a floating action button (bottom-right); it renders as a fixed overlay panel (with a click-to-close backdrop on mobile) instead of a permanent column, so the board keeps its full width when the assistant isn't in use
+- [x] `KanbanCard`: fixed the root cause of the overflow — the title/details container was a flex child with no `min-w-0`, so long unbroken text pushed past the card boundary instead of wrapping. Added `min-w-0`, `break-words`, and `line-clamp` (2 lines for the title, 4 for details, with a native `title` tooltip for the truncated title) so cards stay a bounded, consistent size regardless of how much text a user or the AI puts in
+- [x] Updated unit and e2e tests for the new closed-by-default/toggle behavior; verified visually with screenshots against the real running container (not just assertions) — confirmed clean wrapping on a card with a deliberately long title and details, and the panel opening/closing correctly
+

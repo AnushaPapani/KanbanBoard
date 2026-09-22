@@ -33,6 +33,18 @@ test("edits a card", async ({ page }) => {
   await expect(page.getByText("Updated via e2e")).toBeVisible();
 });
 
+test("chat assistant is closed by default and toggles open/closed", async ({ page }) => {
+  await page.goto("/");
+
+  await expect(page.getByPlaceholder("Ask the assistant...")).not.toBeVisible();
+
+  await page.getByRole("button", { name: /open assistant/i }).click();
+  await expect(page.getByPlaceholder("Ask the assistant...")).toBeVisible();
+
+  await page.getByRole("button", { name: /close assistant/i }).click();
+  await expect(page.getByPlaceholder("Ask the assistant...")).not.toBeVisible();
+});
+
 test("chat sidebar moves a card and updates the board without a reload", async ({ page }) => {
   await page.route("**/api/chat", async (route) => {
     await route.fulfill({
@@ -56,6 +68,7 @@ test("chat sidebar moves a card and updates the board without a reload", async (
   });
 
   await page.goto("/");
+  await page.getByRole("button", { name: /open assistant/i }).click();
   await page.getByPlaceholder("Ask the assistant...").fill("Move Align roadmap themes to Done");
   await page.getByRole("button", { name: /send/i }).click();
 
