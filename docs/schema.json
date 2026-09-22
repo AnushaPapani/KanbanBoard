@@ -2,21 +2,23 @@
   "engine": "sqlite",
   "tables": {
     "users": {
-      "description": "Supports multiple users for the future; the MVP only ever has one row, seeded on first boot.",
+      "description": "Real multi-user accounts. Signup hashes the password with bcrypt before storing it.",
       "columns": {
         "id": "INTEGER PRIMARY KEY",
-        "username": "TEXT NOT NULL UNIQUE"
+        "username": "TEXT NOT NULL UNIQUE",
+        "password_hash": "TEXT NOT NULL"
       }
     },
     "boards": {
-      "description": "One board per user for the MVP, enforced by the UNIQUE constraint on user_id.",
+      "description": "Multiple boards per user (docs/EXPANSION_PLAN.md iteration 2). user_id is no longer UNIQUE — a user can own any number of boards, each with its own name and set of columns/cards.",
       "columns": {
         "id": "INTEGER PRIMARY KEY",
-        "user_id": "INTEGER NOT NULL UNIQUE REFERENCES users(id)"
+        "user_id": "INTEGER NOT NULL REFERENCES users(id)",
+        "name": "TEXT NOT NULL"
       }
     },
     "columns": {
-      "description": "The Kanban board's fixed columns. id is a stable string (e.g. 'col-backlog') matching the frontend's Column.id, not an autoincrement integer, so it round-trips directly with the frontend's BoardData shape.",
+      "description": "The Kanban board's fixed columns. id is a stable, randomly-generated string per board (e.g. 'col-a1b2c3d4'), not an autoincrement integer, so it round-trips directly with the frontend's BoardData shape. Generated per board rather than reusing fixed literals like 'col-backlog', since every user now gets their own board and column ids are a shared primary key across all boards.",
       "columns": {
         "id": "TEXT PRIMARY KEY",
         "board_id": "INTEGER NOT NULL REFERENCES boards(id)",
@@ -36,14 +38,15 @@
     }
   },
   "seed_on_first_boot": {
-    "users": [{ "username": "user" }],
-    "boards": [{ "user": "user" }],
+    "description": "Only the demo account is seeded at boot. Every new user gets one default board named 'My Board' (db.create_user, which calls db.create_board); users can create additional boards afterward via POST /api/boards.",
+    "users": [{ "username": "user", "password": "password (bcrypt-hashed before storage)" }],
+    "boards": [{ "user": "user", "name": "My Board" }],
     "columns": [
-      { "id": "col-backlog", "title": "Backlog", "position": 0 },
-      { "id": "col-discovery", "title": "Discovery", "position": 1 },
-      { "id": "col-progress", "title": "In Progress", "position": 2 },
-      { "id": "col-review", "title": "Review", "position": 3 },
-      { "id": "col-done", "title": "Done", "position": 4 }
+      { "title": "Backlog", "position": 0 },
+      { "title": "Discovery", "position": 1 },
+      { "title": "In Progress", "position": 2 },
+      { "title": "Review", "position": 3 },
+      { "title": "Done", "position": 4 }
     ],
     "cards": []
   }

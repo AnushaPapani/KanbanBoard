@@ -11,9 +11,9 @@ This project is building a Project Management App. Key features:
 
 ## Limitations
 
-For the MVP, there will only be a user sign in (hardcoded to 'user' and 'password') but the database will support multiple users for future.
+Real multi-user sign-in: anyone can sign up with their own username/password (bcrypt-hashed, stored in SQLite). A demo account (`user`/`password`) is still seeded on first boot for continuity with existing docs. This superseded the original MVP's hardcoded-credential limitation — see `docs/EXPANSION_PLAN.md` for the full history.
 
-For the MVP, there will only be 1 Kanban board per signed in user.
+Multi-board: a signed-in user can create and switch between any number of Kanban boards (originally MVP-limited to 1 per user; see `docs/EXPANSION_PLAN.md`).
 
 For the MVP, this will run locally (in a docker container)
 
@@ -27,10 +27,6 @@ For the MVP, this will run locally (in a docker container)
 - Use `claude-sonnet-5` as the model
 - Use SQLLite local database for the database, creating a new db if it doesn't exist
 - Start and Stop server scripts for Mac, PC, Linux in scripts/
-
-## Starting Point
-
-A working MVP of the frontend has been built and is already in frontend. This is not yet designed for the Docker setup. It's a pure frontend-only demo.
 
 ## Color Scheme
 
