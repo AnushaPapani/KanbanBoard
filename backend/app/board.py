@@ -23,11 +23,16 @@ class BoardData(BaseModel):
     cards: dict[str, Card]
 
 
-def _get_board_id(conn: sqlite3.Connection, user_id: int) -> int:
-    row = conn.execute("SELECT id FROM boards WHERE user_id = ?", (user_id,)).fetchone()
-    if row is None:
-        raise HTTPException(status_code=404, detail="Board not found")
-    return row["id"]
+class BoardSummary(BaseModel):
+    id: int
+    name: str
+
+
+def list_boards(conn: sqlite3.Connection, user_id: int) -> list[BoardSummary]:
+    rows = conn.execute(
+        "SELECT id, name FROM boards WHERE user_id = ? ORDER BY id", (user_id,)
+    ).fetchall()
+    return [BoardSummary(id=row["id"], name=row["name"]) for row in rows]
 
 
 def _require_column(conn: sqlite3.Connection, board_id: int, column_id: str) -> None:
@@ -61,8 +66,7 @@ def _renumber_column(conn: sqlite3.Connection, column_id: str) -> None:
         conn.execute("UPDATE cards SET position = ? WHERE id = ?", (index, row["id"]))
 
 
-def get_board(conn: sqlite3.Connection, user_id: int) -> BoardData:
-    board_id = _get_board_id(conn, user_id)
+def get_board(conn: sqlite3.Connection, board_id: int) -> BoardData:
     column_rows = conn.execute(
         "SELECT id, title FROM columns WHERE board_id = ? ORDER BY position", (board_id,)
     ).fetchall()
@@ -87,17 +91,15 @@ def get_board(conn: sqlite3.Connection, user_id: int) -> BoardData:
     return BoardData(columns=columns, cards=cards)
 
 
-def rename_column(conn: sqlite3.Connection, user_id: int, column_id: str, title: str) -> BoardData:
-    board_id = _get_board_id(conn, user_id)
+def rename_column(conn: sqlite3.Connection, board_id: int, column_id: str, title: str) -> BoardData:
     _require_column(conn, board_id, column_id)
     conn.execute("UPDATE columns SET title = ? WHERE id = ?", (title, column_id))
-    return get_board(conn, user_id)
+    return get_board(conn, board_id)
 
 
 def add_card(
-    conn: sqlite3.Connection, user_id: int, column_id: str, title: str, details: str
+    conn: sqlite3.Connection, board_id: int, column_id: str, title: str, details: str
 ) -> BoardData:
-    board_id = _get_board_id(conn, user_id)
     _require_column(conn, board_id, column_id)
     position = conn.execute(
         "SELECT COUNT(*) FROM cards WHERE column_id = ?", (column_id,)
@@ -107,30 +109,27 @@ def add_card(
         "INSERT INTO cards (id, column_id, title, details, position) VALUES (?, ?, ?, ?, ?)",
         (card_id, column_id, title, details, position),
     )
-    return get_board(conn, user_id)
+    return get_board(conn, board_id)
 
 
 def update_card(
-    conn: sqlite3.Connection, user_id: int, card_id: str, title: str, details: str
+    conn: sqlite3.Connection, board_id: int, card_id: str, title: str, details: str
 ) -> BoardData:
-    board_id = _get_board_id(conn, user_id)
     _require_card(conn, board_id, card_id)
     conn.execute("UPDATE cards SET title = ?, details = ? WHERE id = ?", (title, details, card_id))
-    return get_board(conn, user_id)
+    return get_board(conn, board_id)
 
 
-def delete_card(conn: sqlite3.Connection, user_id: int, card_id: str) -> BoardData:
-    board_id = _get_board_id(conn, user_id)
+def delete_card(conn: sqlite3.Connection, board_id: int, card_id: str) -> BoardData:
     card = _require_card(conn, board_id, card_id)
     conn.execute("DELETE FROM cards WHERE id = ?", (card_id,))
     _renumber_column(conn, card["column_id"])
-    return get_board(conn, user_id)
+    return get_board(conn, board_id)
 
 
 def move_card(
-    conn: sqlite3.Connection, user_id: int, card_id: str, target_column_id: str, position: int
+    conn: sqlite3.Connection, board_id: int, card_id: str, target_column_id: str, position: int
 ) -> BoardData:
-    board_id = _get_board_id(conn, user_id)
     card = _require_card(conn, board_id, card_id)
     _require_column(conn, board_id, target_column_id)
 
@@ -151,7 +150,7 @@ def move_card(
         "INSERT INTO cards (id, column_id, title, details, position) VALUES (?, ?, ?, ?, ?)",
         (card_id, target_column_id, card["title"], card["details"], clamped_position),
     )
-    return get_board(conn, user_id)
+    return get_board(conn, board_id)
 
 
 class AddCardAction(BaseModel):
@@ -194,19 +193,19 @@ ChatAction = Annotated[
 _chat_action_adapter: TypeAdapter[ChatAction] = TypeAdapter(ChatAction)
 
 
-def apply_action(conn: sqlite3.Connection, user_id: int, action: dict) -> None:
+def apply_action(conn: sqlite3.Connection, board_id: int, action: dict) -> None:
     try:
         parsed = _chat_action_adapter.validate_python(action)
     except ValidationError as exc:
         raise HTTPException(status_code=400, detail=f"Invalid board action: {exc}") from exc
 
     if isinstance(parsed, AddCardAction):
-        add_card(conn, user_id, parsed.column_id, parsed.title, parsed.details)
+        add_card(conn, board_id, parsed.column_id, parsed.title, parsed.details)
     elif isinstance(parsed, UpdateCardAction):
-        update_card(conn, user_id, parsed.card_id, parsed.title, parsed.details)
+        update_card(conn, board_id, parsed.card_id, parsed.title, parsed.details)
     elif isinstance(parsed, DeleteCardAction):
-        delete_card(conn, user_id, parsed.card_id)
+        delete_card(conn, board_id, parsed.card_id)
     elif isinstance(parsed, MoveCardAction):
-        move_card(conn, user_id, parsed.card_id, parsed.column_id, parsed.position)
+        move_card(conn, board_id, parsed.card_id, parsed.column_id, parsed.position)
     elif isinstance(parsed, RenameColumnAction):
-        rename_column(conn, user_id, parsed.column_id, parsed.title)
+        rename_column(conn, board_id, parsed.column_id, parsed.title)

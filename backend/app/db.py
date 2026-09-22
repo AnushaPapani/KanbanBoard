@@ -1,27 +1,36 @@
+import secrets
 import sqlite3
 from pathlib import Path
 
-from app.constants import HARDCODED_USERNAME
+from app.constants import DEMO_PASSWORD, DEMO_USERNAME
+from app.security import hash_password
 
 DB_PATH = Path(__file__).resolve().parents[1] / "data" / "app.db"
 
+# (title, position). Column ids are generated per board (see create_user) —
+# they used to be these fixed strings, but that only worked when there was
+# ever exactly one board in the whole database; with multiple users each
+# getting their own board, reusing the same literal ids collides on the
+# columns.id primary key.
 SEED_COLUMNS = [
-    ("col-backlog", "Backlog", 0),
-    ("col-discovery", "Discovery", 1),
-    ("col-progress", "In Progress", 2),
-    ("col-review", "Review", 3),
-    ("col-done", "Done", 4),
+    ("Backlog", 0),
+    ("Discovery", 1),
+    ("In Progress", 2),
+    ("Review", 3),
+    ("Done", 4),
 ]
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY,
-    username TEXT NOT NULL UNIQUE
+    username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS boards (
     id INTEGER PRIMARY KEY,
-    user_id INTEGER NOT NULL UNIQUE REFERENCES users(id)
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    name TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS columns (
@@ -53,23 +62,37 @@ def get_connection() -> sqlite3.Connection:
     return conn
 
 
+def create_board(conn: sqlite3.Connection, user_id: int, name: str) -> int:
+    """Create a board (with seed columns) for user_id. Does not commit."""
+    conn.execute("INSERT INTO boards (user_id, name) VALUES (?, ?)", (user_id, name))
+    board_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    conn.executemany(
+        "INSERT INTO columns (id, board_id, title, position) VALUES (?, ?, ?, ?)",
+        [
+            (f"col-{secrets.token_hex(4)}", board_id, title, position)
+            for title, position in SEED_COLUMNS
+        ],
+    )
+    return board_id
+
+
+def create_user(conn: sqlite3.Connection, username: str, password: str) -> int:
+    """Create a user with one default board (+ seed columns). Does not commit."""
+    conn.execute(
+        "INSERT INTO users (username, password_hash) VALUES (?, ?)",
+        (username, hash_password(password)),
+    )
+    user_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    create_board(conn, user_id, "My Board")
+    return user_id
+
+
 def init_db() -> None:
     conn = get_connection()
     try:
         conn.executescript(SCHEMA)
         if conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:
-            conn.execute("INSERT INTO users (username) VALUES (?)", (HARDCODED_USERNAME,))
-            user_id = conn.execute(
-                "SELECT id FROM users WHERE username = ?", (HARDCODED_USERNAME,)
-            ).fetchone()[0]
-            conn.execute("INSERT INTO boards (user_id) VALUES (?)", (user_id,))
-            board_id = conn.execute(
-                "SELECT id FROM boards WHERE user_id = ?", (user_id,)
-            ).fetchone()[0]
-            conn.executemany(
-                "INSERT INTO columns (id, board_id, title, position) VALUES (?, ?, ?, ?)",
-                [(col_id, board_id, title, position) for col_id, title, position in SEED_COLUMNS],
-            )
+            create_user(conn, DEMO_USERNAME, DEMO_PASSWORD)
         conn.commit()
     finally:
         conn.close()

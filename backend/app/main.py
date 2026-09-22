@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app import ai, board, db
-from app.constants import HARDCODED_PASSWORD, HARDCODED_USERNAME
+from app.security import verify_password
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 FRONTEND_BUILD_DIR = PROJECT_ROOT / "frontend" / "out"
@@ -39,6 +39,10 @@ class Credentials(BaseModel):
 
 class SessionInfo(BaseModel):
     username: str
+
+
+class NewBoardRequest(BaseModel):
+    name: str
 
 
 class RenameColumnRequest(BaseModel):
@@ -70,9 +74,10 @@ class ChatResponse(BaseModel):
     board: board.BoardData
 
 
-# In-memory chat history: MVP has no persistent history table, lost on
-# backend restart (acceptable for this stage, consistent with sessions).
-chat_history: dict[int, list[dict]] = {}
+# In-memory chat history, keyed by (user_id, board_id): MVP has no
+# persistent history table, lost on backend restart (acceptable for this
+# stage, consistent with sessions).
+chat_history: dict[tuple[int, int], list[dict]] = {}
 
 
 def get_db() -> Iterator[sqlite3.Connection]:
@@ -94,20 +99,68 @@ def require_user_id(request: Request, conn: sqlite3.Connection = Depends(get_db)
     return row["id"]
 
 
+def require_board_id(
+    board_id: int,
+    conn: sqlite3.Connection = Depends(get_db),
+    user_id: int = Depends(require_user_id),
+) -> int:
+    row = conn.execute(
+        "SELECT id FROM boards WHERE id = ? AND user_id = ?", (board_id, user_id)
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Board not found")
+    return board_id
+
+
 @app.get("/api/health")
 async def healthcheck() -> dict[str, str]:
     return {"status": "ok", "message": "hello from the api"}
 
 
+def _start_session(response: Response, username: str) -> None:
+    token = secrets.token_urlsafe(32)
+    sessions[token] = username
+    response.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="lax")
+
+
+@app.post("/api/signup", response_model=SessionInfo)
+async def signup(
+    credentials: Credentials,
+    response: Response,
+    conn: sqlite3.Connection = Depends(get_db),
+) -> SessionInfo:
+    username = credentials.username.strip()
+    if not username or not credentials.password:
+        raise HTTPException(status_code=400, detail="Username and password are required")
+
+    existing = conn.execute(
+        "SELECT id FROM users WHERE username = ?", (username,)
+    ).fetchone()
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="Username is already taken")
+
+    db.create_user(conn, username, credentials.password)
+    conn.commit()
+
+    _start_session(response, username)
+    return SessionInfo(username=username)
+
+
 @app.post("/api/login", response_model=SessionInfo)
-async def login(credentials: Credentials, response: Response) -> SessionInfo:
-    if credentials.username != HARDCODED_USERNAME or credentials.password != HARDCODED_PASSWORD:
+async def login(
+    credentials: Credentials,
+    response: Response,
+    conn: sqlite3.Connection = Depends(get_db),
+) -> SessionInfo:
+    row = conn.execute(
+        "SELECT username, password_hash FROM users WHERE username = ?",
+        (credentials.username,),
+    ).fetchone()
+    if row is None or not verify_password(credentials.password, row["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
-    token = secrets.token_urlsafe(32)
-    sessions[token] = credentials.username
-    response.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="lax")
-    return SessionInfo(username=credentials.username)
+    _start_session(response, row["username"])
+    return SessionInfo(username=row["username"])
 
 
 @app.post("/api/logout")
@@ -128,86 +181,106 @@ async def me(request: Request) -> SessionInfo:
     return SessionInfo(username=username)
 
 
-@app.get("/api/board", response_model=board.BoardData)
-async def get_board(
+@app.get("/api/boards", response_model=list[board.BoardSummary])
+async def list_boards(
     conn: sqlite3.Connection = Depends(get_db), user_id: int = Depends(require_user_id)
+) -> list[board.BoardSummary]:
+    return board.list_boards(conn, user_id)
+
+
+@app.post("/api/boards", response_model=board.BoardSummary)
+async def create_board(
+    body: NewBoardRequest,
+    conn: sqlite3.Connection = Depends(get_db),
+    user_id: int = Depends(require_user_id),
+) -> board.BoardSummary:
+    name = body.name.strip() or "Untitled board"
+    new_board_id = db.create_board(conn, user_id, name)
+    conn.commit()
+    return board.BoardSummary(id=new_board_id, name=name)
+
+
+@app.get("/api/boards/{board_id}", response_model=board.BoardData)
+async def get_board(
+    conn: sqlite3.Connection = Depends(get_db), board_id: int = Depends(require_board_id)
 ) -> board.BoardData:
-    return board.get_board(conn, user_id)
+    return board.get_board(conn, board_id)
 
 
-@app.patch("/api/board/columns/{column_id}", response_model=board.BoardData)
+@app.patch("/api/boards/{board_id}/columns/{column_id}", response_model=board.BoardData)
 async def rename_column(
     column_id: str,
     body: RenameColumnRequest,
     conn: sqlite3.Connection = Depends(get_db),
-    user_id: int = Depends(require_user_id),
+    board_id: int = Depends(require_board_id),
 ) -> board.BoardData:
-    result = board.rename_column(conn, user_id, column_id, body.title)
+    result = board.rename_column(conn, board_id, column_id, body.title)
     conn.commit()
     return result
 
 
-@app.post("/api/board/cards", response_model=board.BoardData)
+@app.post("/api/boards/{board_id}/cards", response_model=board.BoardData)
 async def add_card(
     body: NewCardRequest,
     conn: sqlite3.Connection = Depends(get_db),
-    user_id: int = Depends(require_user_id),
+    board_id: int = Depends(require_board_id),
 ) -> board.BoardData:
-    result = board.add_card(conn, user_id, body.column_id, body.title, body.details)
+    result = board.add_card(conn, board_id, body.column_id, body.title, body.details)
     conn.commit()
     return result
 
 
-@app.patch("/api/board/cards/{card_id}", response_model=board.BoardData)
+@app.patch("/api/boards/{board_id}/cards/{card_id}", response_model=board.BoardData)
 async def update_card(
     card_id: str,
     body: UpdateCardRequest,
     conn: sqlite3.Connection = Depends(get_db),
-    user_id: int = Depends(require_user_id),
+    board_id: int = Depends(require_board_id),
 ) -> board.BoardData:
-    result = board.update_card(conn, user_id, card_id, body.title, body.details)
+    result = board.update_card(conn, board_id, card_id, body.title, body.details)
     conn.commit()
     return result
 
 
-@app.delete("/api/board/cards/{card_id}", response_model=board.BoardData)
+@app.delete("/api/boards/{board_id}/cards/{card_id}", response_model=board.BoardData)
 async def delete_card(
     card_id: str,
     conn: sqlite3.Connection = Depends(get_db),
-    user_id: int = Depends(require_user_id),
+    board_id: int = Depends(require_board_id),
 ) -> board.BoardData:
-    result = board.delete_card(conn, user_id, card_id)
+    result = board.delete_card(conn, board_id, card_id)
     conn.commit()
     return result
 
 
-@app.post("/api/board/cards/{card_id}/move", response_model=board.BoardData)
+@app.post("/api/boards/{board_id}/cards/{card_id}/move", response_model=board.BoardData)
 async def move_card(
     card_id: str,
     body: MoveCardRequest,
     conn: sqlite3.Connection = Depends(get_db),
-    user_id: int = Depends(require_user_id),
+    board_id: int = Depends(require_board_id),
 ) -> board.BoardData:
-    result = board.move_card(conn, user_id, card_id, body.column_id, body.position)
+    result = board.move_card(conn, board_id, card_id, body.column_id, body.position)
     conn.commit()
     return result
 
 
-@app.post("/api/chat", response_model=ChatResponse)
+@app.post("/api/boards/{board_id}/chat", response_model=ChatResponse)
 async def chat(
     body: ChatRequest,
     conn: sqlite3.Connection = Depends(get_db),
+    board_id: int = Depends(require_board_id),
     user_id: int = Depends(require_user_id),
 ) -> ChatResponse:
-    current_board = board.get_board(conn, user_id)
-    history = chat_history.setdefault(user_id, [])
+    current_board = board.get_board(conn, board_id)
+    history = chat_history.setdefault((user_id, board_id), [])
 
     result = ai.chat(current_board.model_dump_json(), history, body.message)
     reply = result["reply"]
 
     try:
         for action in result.get("actions", []):
-            board.apply_action(conn, user_id, action)
+            board.apply_action(conn, board_id, action)
     except HTTPException:
         conn.rollback()
         raise
@@ -216,7 +289,7 @@ async def chat(
     history.append({"role": "user", "content": body.message})
     history.append({"role": "assistant", "content": reply})
 
-    return ChatResponse(reply=reply, board=board.get_board(conn, user_id))
+    return ChatResponse(reply=reply, board=board.get_board(conn, board_id))
 
 
 if FRONTEND_BUILD_DIR.exists():
