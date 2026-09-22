@@ -3,6 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import Home from "@/app/page";
 
+const boardsListResponse = () =>
+  new Response(JSON.stringify([{ id: 1, name: "My Board" }]), { status: 200 });
+
 const emptyBoardResponse = () =>
   new Response(JSON.stringify({ columns: [], cards: {} }), { status: 200 });
 
@@ -33,6 +36,7 @@ describe("Home (auth gate)", () => {
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ username: "user" }), { status: 200 })
     );
+    fetchMock.mockResolvedValueOnce(boardsListResponse());
     fetchMock.mockResolvedValueOnce(emptyBoardResponse());
 
     render(<Home />);
@@ -40,7 +44,7 @@ describe("Home (auth gate)", () => {
 
     await userEvent.type(screen.getByLabelText("Username"), "user");
     await userEvent.type(screen.getByLabelText("Password"), "password");
-    await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
 
     expect(await screen.findByRole("heading", { name: "Kanban Studio" })).toBeInTheDocument();
   });
@@ -50,6 +54,7 @@ describe("Home (auth gate)", () => {
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ username: "user" }), { status: 200 })
     );
+    fetchMock.mockResolvedValueOnce(boardsListResponse());
     fetchMock.mockResolvedValueOnce(emptyBoardResponse());
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 200 }));
 

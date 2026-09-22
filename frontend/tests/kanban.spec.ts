@@ -46,7 +46,7 @@ test("chat assistant is closed by default and toggles open/closed", async ({ pag
 });
 
 test("chat sidebar moves a card and updates the board without a reload", async ({ page }) => {
-  await page.route("**/api/chat", async (route) => {
+  await page.route("**/api/boards/*/chat", async (route) => {
     await route.fulfill({
       json: {
         reply: "Moved it to Done!",

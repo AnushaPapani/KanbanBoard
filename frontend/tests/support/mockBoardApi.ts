@@ -18,24 +18,52 @@ const seedBoard = (): BoardData => ({
   },
 });
 
+const newBoardColumns = (suffix: number): Column[] => [
+  { id: `col-backlog-${suffix}`, title: "Backlog", cardIds: [] },
+  { id: `col-discovery-${suffix}`, title: "Discovery", cardIds: [] },
+  { id: `col-progress-${suffix}`, title: "In Progress", cardIds: [] },
+  { id: `col-review-${suffix}`, title: "Review", cardIds: [] },
+  { id: `col-done-${suffix}`, title: "Done", cardIds: [] },
+];
+
 let nextCardId = 100;
+let nextBoardId = 2;
+
+const pathParts = (url: string) => new URL(url).pathname.split("/");
 
 export const mockBoardApi = async (page: Page) => {
-  const board = seedBoard();
+  const boards = new Map<number, BoardData>([[1, seedBoard()]]);
+  const boardNames = new Map<number, string>([[1, "My Board"]]);
 
-  await page.route("**/api/board", async (route) => {
-    await route.fulfill({ json: board });
+  await page.route("**/api/boards", async (route) => {
+    if (route.request().method() === "POST") {
+      const { name } = route.request().postDataJSON();
+      const id = nextBoardId++;
+      boards.set(id, { columns: newBoardColumns(id), cards: {} });
+      boardNames.set(id, name);
+      await route.fulfill({ json: { id, name } });
+      return;
+    }
+    const summary = Array.from(boardNames.entries()).map(([id, name]) => ({ id, name }));
+    await route.fulfill({ json: summary });
   });
 
-  await page.route("**/api/board/columns/*", async (route) => {
-    const columnId = route.request().url().split("/").pop()!;
+  await page.route("**/api/boards/*", async (route) => {
+    const boardId = Number(pathParts(route.request().url())[3]);
+    await route.fulfill({ json: boards.get(boardId) });
+  });
+
+  await page.route("**/api/boards/*/columns/*", async (route) => {
+    const parts = pathParts(route.request().url());
+    const board = boards.get(Number(parts[3]))!;
     const { title } = route.request().postDataJSON();
-    const column = board.columns.find((c) => c.id === columnId);
+    const column = board.columns.find((c) => c.id === parts[5]);
     if (column) column.title = title;
     await route.fulfill({ json: board });
   });
 
-  await page.route("**/api/board/cards", async (route) => {
+  await page.route("**/api/boards/*/cards", async (route) => {
+    const board = boards.get(Number(pathParts(route.request().url())[3]))!;
     const { column_id: columnId, title, details } = route.request().postDataJSON();
     const id = `card-${nextCardId++}`;
     board.cards[id] = { id, title, details };
@@ -43,8 +71,10 @@ export const mockBoardApi = async (page: Page) => {
     await route.fulfill({ json: board });
   });
 
-  await page.route("**/api/board/cards/*/move", async (route) => {
-    const cardId = route.request().url().split("/").slice(-2)[0];
+  await page.route("**/api/boards/*/cards/*/move", async (route) => {
+    const parts = pathParts(route.request().url());
+    const board = boards.get(Number(parts[3]))!;
+    const cardId = parts[5];
     const { column_id: targetColumnId, position } = route.request().postDataJSON();
     for (const column of board.columns) {
       column.cardIds = column.cardIds.filter((id) => id !== cardId);
@@ -53,9 +83,11 @@ export const mockBoardApi = async (page: Page) => {
     await route.fulfill({ json: board });
   });
 
-  await page.route("**/api/board/cards/*", async (route) => {
+  await page.route("**/api/boards/*/cards/*", async (route) => {
+    const parts = pathParts(route.request().url());
+    const board = boards.get(Number(parts[3]))!;
+    const cardId = parts[5];
     const method = route.request().method();
-    const cardId = route.request().url().split("/").pop()!;
     if (method === "PATCH") {
       const { title, details } = route.request().postDataJSON();
       board.cards[cardId] = { id: cardId, title, details };

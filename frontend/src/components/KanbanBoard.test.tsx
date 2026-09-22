@@ -3,9 +3,24 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { KanbanBoard } from "@/components/KanbanBoard";
 import * as api from "@/lib/api";
+import { ApiError } from "@/lib/api";
+import { SessionContext } from "@/lib/SessionContext";
 import type { BoardData } from "@/lib/kanban";
 
-vi.mock("@/lib/api");
+// Auto-mocking @/lib/api would also replace the ApiError class, breaking
+// `instanceof ApiError` checks (e.g. isSessionExpired) with a different
+// class reference. Keep the real exports and only mock the functions.
+vi.mock("@/lib/api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api")>()),
+  fetchBoard: vi.fn(),
+  renameColumn: vi.fn(),
+  addCard: vi.fn(),
+  updateCard: vi.fn(),
+  deleteCard: vi.fn(),
+  moveCard: vi.fn(),
+}));
+
+const BOARD_ID = 1;
 
 const seedBoard = (): BoardData => ({
   columns: [
@@ -25,8 +40,16 @@ describe("KanbanBoard", () => {
   });
 
   it("loads and renders the board's columns", async () => {
-    render(<KanbanBoard />);
+    render(<KanbanBoard boardId={BOARD_ID} />);
     expect(await screen.findAllByTestId(/column-/i)).toHaveLength(2);
+    expect(api.fetchBoard).toHaveBeenCalledWith(BOARD_ID);
+  });
+
+  it("pluralizes the card count correctly", async () => {
+    render(<KanbanBoard boardId={BOARD_ID} />);
+    const columns = await screen.findAllByTestId(/column-/i);
+    expect(within(columns[0]).getByText("1 card")).toBeInTheDocument();
+    expect(within(columns[1]).getByText("0 cards")).toBeInTheDocument();
   });
 
   it("renames a column on blur", async () => {
@@ -37,14 +60,16 @@ describe("KanbanBoard", () => {
     };
     vi.mocked(api.renameColumn).mockResolvedValue(renamed);
 
-    render(<KanbanBoard />);
+    render(<KanbanBoard boardId={BOARD_ID} />);
     const column = await getFirstColumn();
     const input = within(column).getByLabelText("Column title");
     await userEvent.clear(input);
     await userEvent.type(input, "New Name");
     await userEvent.tab();
 
-    await waitFor(() => expect(api.renameColumn).toHaveBeenCalledWith("col-a", "New Name"));
+    await waitFor(() =>
+      expect(api.renameColumn).toHaveBeenCalledWith(BOARD_ID, "col-a", "New Name")
+    );
     expect(await within(column).findByDisplayValue("New Name")).toBeInTheDocument();
   });
 
@@ -63,7 +88,7 @@ describe("KanbanBoard", () => {
     vi.mocked(api.addCard).mockResolvedValue(withNewCard);
     vi.mocked(api.deleteCard).mockResolvedValue(base);
 
-    render(<KanbanBoard />);
+    render(<KanbanBoard boardId={BOARD_ID} />);
     const column = await getFirstColumn();
 
     const addButton = within(column).getByRole("button", { name: /add a card/i });
@@ -98,7 +123,7 @@ describe("KanbanBoard", () => {
     };
     vi.mocked(api.updateCard).mockResolvedValue(updated);
 
-    render(<KanbanBoard />);
+    render(<KanbanBoard boardId={BOARD_ID} />);
     const column = await getFirstColumn();
 
     await userEvent.click(
@@ -111,8 +136,22 @@ describe("KanbanBoard", () => {
     await userEvent.click(within(column).getByRole("button", { name: /save/i }));
 
     await waitFor(() =>
-      expect(api.updateCard).toHaveBeenCalledWith("card-1", "Updated title", "Notes")
+      expect(api.updateCard).toHaveBeenCalledWith(BOARD_ID, "card-1", "Updated title", "Notes")
     );
     expect(await within(column).findByText("Updated title")).toBeInTheDocument();
+  });
+
+  it("signals session expiry on a 401 instead of showing the generic error state", async () => {
+    vi.mocked(api.fetchBoard).mockRejectedValue(new ApiError(401, "Not authenticated"));
+    const notifyUnauthorized = vi.fn();
+
+    render(
+      <SessionContext.Provider value={{ notifyUnauthorized }}>
+        <KanbanBoard boardId={BOARD_ID} />
+      </SessionContext.Provider>
+    );
+
+    await waitFor(() => expect(notifyUnauthorized).toHaveBeenCalled());
+    expect(screen.queryByText(/could not load the board/i)).not.toBeInTheDocument();
   });
 });

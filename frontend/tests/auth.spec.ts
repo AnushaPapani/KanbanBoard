@@ -23,6 +23,16 @@ const mockAuth = async (page: Page) => {
     }
   });
 
+  await page.route("**/api/signup", async (route) => {
+    const body = route.request().postDataJSON();
+    if (body.username === "user") {
+      await route.fulfill({ status: 409, json: { detail: "Username is already taken" } });
+    } else {
+      authenticated = true;
+      await route.fulfill({ json: { username: body.username } });
+    }
+  });
+
   await page.route("**/api/logout", async (route) => {
     authenticated = false;
     await route.fulfill({ json: { status: "ok" } });
@@ -39,7 +49,7 @@ test("shows the login form when signed out, then reveals the board on sign in", 
 
   await page.getByLabel("Username").fill("user");
   await page.getByLabel("Password").fill("password");
-  await page.getByRole("button", { name: /sign in/i }).click();
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
 
   await expect(page.getByRole("heading", { name: "Kanban Studio" })).toBeVisible();
 });
@@ -50,9 +60,23 @@ test("rejects the wrong password", async ({ page }) => {
 
   await page.getByLabel("Username").fill("user");
   await page.getByLabel("Password").fill("wrong");
-  await page.getByRole("button", { name: /sign in/i }).click();
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
 
   await expect(page.getByText(/invalid username or password/i)).toBeVisible();
+});
+
+test("signs up as a new user and reveals the board", async ({ page }) => {
+  await mockAuth(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Switch to sign up" }).click();
+  await expect(page.getByRole("heading", { name: "Create an account" })).toBeVisible();
+
+  await page.getByLabel("Username").fill("newperson");
+  await page.getByLabel("Password").fill("hunter2");
+  await page.getByRole("button", { name: "Create account" }).click();
+
+  await expect(page.getByRole("heading", { name: "Kanban Studio" })).toBeVisible();
 });
 
 test("logout returns to the login form", async ({ page }) => {
@@ -61,7 +85,7 @@ test("logout returns to the login form", async ({ page }) => {
 
   await page.getByLabel("Username").fill("user");
   await page.getByLabel("Password").fill("password");
-  await page.getByRole("button", { name: /sign in/i }).click();
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Kanban Studio" })).toBeVisible();
 
   await page.getByRole("button", { name: /log out/i }).click();

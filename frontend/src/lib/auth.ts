@@ -18,6 +18,16 @@ export const login = async (username: string, password: string): Promise<Session
   return parseJsonOrThrow(response);
 };
 
+export const signup = async (username: string, password: string): Promise<Session> => {
+  const response = await fetch("/api/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ username, password }),
+  });
+  return parseJsonOrThrow(response);
+};
+
 export const logout = async (): Promise<void> => {
   await fetch("/api/logout", { method: "POST", credentials: "include" });
 };

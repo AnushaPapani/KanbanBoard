@@ -1,27 +1,40 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { login } from "@/lib/auth";
+import { login, signup } from "@/lib/auth";
 
 type LoginFormProps = {
   onSuccess: (username: string) => void;
 };
 
+type Mode = "sign-in" | "sign-up";
+
 export const LoginForm = ({ onSuccess }: LoginFormProps) => {
+  const [mode, setMode] = useState<Mode>("sign-in");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  const switchMode = (nextMode: Mode) => {
+    setMode(nextMode);
+    setError(null);
+  };
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     setSubmitting(true);
     setError(null);
     try {
-      const session = await login(username, password);
+      const session =
+        mode === "sign-in" ? await login(username, password) : await signup(username, password);
       onSuccess(session.username);
-    } catch {
-      setError("Invalid username or password.");
+    } catch (err) {
+      if (mode === "sign-in") {
+        setError("Invalid username or password.");
+      } else {
+        setError(err instanceof Error ? err.message : "Could not create your account.");
+      }
     } finally {
       setSubmitting(false);
     }
@@ -37,8 +50,38 @@ export const LoginForm = ({ onSuccess }: LoginFormProps) => {
           Kanban Studio
         </p>
         <h1 className="mt-3 font-display text-3xl font-semibold text-[var(--navy-dark)]">
-          Sign in
+          {mode === "sign-in" ? "Sign in" : "Create an account"}
         </h1>
+
+        <div className="mt-5 flex gap-1 rounded-full bg-[var(--surface)] p-1">
+          <button
+            type="button"
+            onClick={() => switchMode("sign-in")}
+            aria-pressed={mode === "sign-in"}
+            aria-label="Switch to sign in"
+            className={`flex-1 rounded-full px-3 py-1.5 text-xs font-semibold uppercase tracking-wide transition ${
+              mode === "sign-in"
+                ? "bg-white text-[var(--navy-dark)] shadow-sm"
+                : "text-[var(--gray-text)]"
+            }`}
+          >
+            Sign in
+          </button>
+          <button
+            type="button"
+            onClick={() => switchMode("sign-up")}
+            aria-pressed={mode === "sign-up"}
+            aria-label="Switch to sign up"
+            className={`flex-1 rounded-full px-3 py-1.5 text-xs font-semibold uppercase tracking-wide transition ${
+              mode === "sign-up"
+                ? "bg-white text-[var(--navy-dark)] shadow-sm"
+                : "text-[var(--gray-text)]"
+            }`}
+          >
+            Sign up
+          </button>
+        </div>
+
         <label className="mt-6 block text-sm font-semibold text-[var(--navy-dark)]">
           Username
           <input
@@ -55,7 +98,7 @@ export const LoginForm = ({ onSuccess }: LoginFormProps) => {
             value={password}
             onChange={(event) => setPassword(event.target.value)}
             className="mt-2 w-full rounded-xl border border-[var(--stroke)] px-4 py-2 text-sm outline-none focus:border-[var(--primary-blue)]"
-            autoComplete="current-password"
+            autoComplete={mode === "sign-in" ? "current-password" : "new-password"}
           />
         </label>
         {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
@@ -64,7 +107,13 @@ export const LoginForm = ({ onSuccess }: LoginFormProps) => {
           disabled={submitting}
           className="mt-6 w-full rounded-full bg-[var(--secondary-purple)] px-4 py-3 text-sm font-semibold text-white transition disabled:opacity-60"
         >
-          {submitting ? "Signing in..." : "Sign in"}
+          {submitting
+            ? mode === "sign-in"
+              ? "Signing in..."
+              : "Creating account..."
+            : mode === "sign-in"
+              ? "Sign in"
+              : "Create account"}
         </button>
       </form>
     </main>

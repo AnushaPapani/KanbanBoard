@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from "react";
 import * as api from "@/lib/api";
 import type { BoardData } from "@/lib/kanban";
+import { isSessionExpired, useSession } from "@/lib/SessionContext";
 
 type ChatMessage = {
   role: "user" | "assistant";
@@ -10,12 +11,14 @@ type ChatMessage = {
 };
 
 type ChatSidebarProps = {
+  boardId: number;
   isOpen: boolean;
   onClose: () => void;
   onBoardUpdate: (board: BoardData) => void;
 };
 
-export const ChatSidebar = ({ isOpen, onClose, onBoardUpdate }: ChatSidebarProps) => {
+export const ChatSidebar = ({ boardId, isOpen, onClose, onBoardUpdate }: ChatSidebarProps) => {
+  const { notifyUnauthorized } = useSession();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -32,10 +35,14 @@ export const ChatSidebar = ({ isOpen, onClose, onBoardUpdate }: ChatSidebarProps
     setError(null);
 
     try {
-      const result = await api.sendChatMessage(message);
+      const result = await api.sendChatMessage(boardId, message);
       setMessages((prev) => [...prev, { role: "assistant", content: result.reply }]);
       onBoardUpdate(result.board);
-    } catch {
+    } catch (err) {
+      if (isSessionExpired(err)) {
+        notifyUnauthorized();
+        return;
+      }
       setError("Something went wrong. Please try again.");
     } finally {
       setSending(false);
